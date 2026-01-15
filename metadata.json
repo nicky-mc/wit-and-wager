@@ -1,0 +1,8 @@
+{
+  "name": "Wit & Wager",
+  "description": "A chaotic multiplayer board game with real-time video trivia and wagers.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
