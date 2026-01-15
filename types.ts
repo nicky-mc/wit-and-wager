@@ -27,9 +27,10 @@ export interface Player {
   name: string;
   avatar: string;
   score: number;
-  position: number; // Board position (0-40)
+  position: number; // Board position (0-23)
   isHost: boolean;
   isMe: boolean;
+  statusEffect?: 'frozen' | 'none'; // New: For Sabotage
   mediaStatus: {
     audio: boolean;
     video: boolean;
@@ -39,16 +40,18 @@ export interface Player {
 export enum GamePhase {
   LOBBY = 'LOBBY',
   BOARD = 'BOARD',
-  TRIVIA_PENDING = 'TRIVIA_PENDING', // Showing prompt/video
-  TRIVIA_ANSWERING = 'TRIVIA_ANSWERING', // Inputting answers
-  TRIVIA_REVEAL = 'TRIVIA_REVEAL'
+  TRIVIA_PENDING = 'TRIVIA_PENDING',
+  TRIVIA_ANSWERING = 'TRIVIA_ANSWERING',
+  TRIVIA_REVEAL = 'TRIVIA_REVEAL',
+  GAME_OVER = 'GAME_OVER' // New Phase
 }
 
 export interface GameState {
   roomCode: string;
   phase: GamePhase;
-  currentPlayerTurn: string; // Player ID
+  currentPlayerTurn: string;
   activeQuestion: Question | null;
+  winnerId?: string | null; // New: Track Winner
   videoSync: {
     isPlaying: boolean;
     currentTime: number;

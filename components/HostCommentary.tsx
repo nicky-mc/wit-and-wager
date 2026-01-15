@@ -28,10 +28,18 @@ const HostCommentary: React.FC = () => {
                 roast = getRandomRoast('missed_question');
                 break;
             case 'streak':
-                // Only roast success occasionally to keep it cynical
-                if (Math.random() > 0.7) {
+                if (Math.random() > 0.6) {
                     roast = getRandomRoast('streak');
                 }
+                break;
+            case 'sabotage':
+                roast = getRandomRoast('sabotage');
+                break;
+            case 'frozen_turn':
+                roast = getRandomRoast('frozen_turn');
+                break;
+            case 'win':
+                roast = getRandomRoast('win');
                 break;
             default:
                 break;
@@ -57,16 +65,11 @@ const HostCommentary: React.FC = () => {
         setVisible(false);
         setIsThinking(true);
         
-        // Simulate "thinking" or typing delay
         setTimeout(() => {
             setIsThinking(false);
             setMessage(text);
             setVisible(true);
-            
-            // Auto hide after 8 seconds
-            setTimeout(() => {
-                setVisible(false);
-            }, 8000);
+            setTimeout(() => setVisible(false), 8000);
         }, 1000);
     };
 
@@ -77,15 +80,19 @@ const HostCommentary: React.FC = () => {
         `}>
             {/* The Host Avatar (Shadowy Figure) */}
             <div className="flex items-end gap-3">
-                <div className="w-16 h-16 rounded-full bg-black border-2 border-neon-pink shadow-[0_0_20px_#d946ef] relative overflow-hidden shrink-0">
+                <div className="w-16 h-16 rounded-full bg-black border-2 border-neon-pink shadow-[0_0_20px_#d946ef] relative overflow-hidden shrink-0 group">
                      <div className="absolute bottom-0 w-full h-4/5 bg-gray-900 rounded-t-full mx-auto left-0 right-0 max-w-[80%]"></div>
                      <div className="absolute top-6 left-3 w-3 h-1 bg-white shadow-[0_0_5px_white] animate-pulse"></div>
                      <div className="absolute top-6 right-3 w-3 h-1 bg-white shadow-[0_0_5px_white] animate-pulse"></div>
+                     <div className="absolute inset-0 bg-red-500/0 group-hover:bg-red-500/20 transition-colors"></div>
                 </div>
 
                 {/* Speech Bubble */}
-                <div className="relative bg-black/90 border border-white/20 p-4 rounded-t-2xl rounded-br-2xl text-sm font-mono leading-relaxed shadow-xl max-w-[250px]">
-                    <div className="text-neon-pink text-xs font-bold uppercase mb-1 tracking-widest">The Host</div>
+                <div className="relative bg-black/90 border border-white/20 p-4 rounded-t-2xl rounded-br-2xl text-sm font-mono leading-relaxed shadow-xl max-w-[250px] animate-in slide-in-from-left duration-300">
+                    <div className="text-neon-pink text-xs font-bold uppercase mb-1 tracking-widest flex justify-between">
+                        <span>The Host</span>
+                        {isThinking && <span className="animate-pulse">...</span>}
+                    </div>
                     {isThinking ? (
                         <div className="flex gap-1 h-5 items-center">
                             <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>

@@ -20,64 +20,67 @@ interface QuestionContextType {
   myId: string;
   currentPlayerId: string;
   endTurn: () => Promise<void>;
-  lastEvent: { type: string; value?: any; timestamp: number } | null; // For Host Commentary
+  sabotagePlayer: (targetId: string, type: 'freeze' | 'bomb') => Promise<void>;
+  lastEvent: { type: string; value?: any; timestamp: number } | null;
+  winnerId: string | null;
 }
 
 const QuestionContext = createContext<QuestionContextType | undefined>(undefined);
 
-// Generate a random ID for this session if not persisted
 const MY_ID = `player-${Math.floor(Math.random() * 10000)}`;
 const ROOM_ID = "NEON-NIGHTS";
 
-// Mock Fallbacks with TRAGEDY AVATARS
 const MOCK_PLAYERS: Player[] = [
-    { id: MY_ID, name: 'ME', avatar: '🗑️🔥', score: 0, position: 0, isHost: true, isMe: true, mediaStatus: {audio:true, video:true} },
-    { id: 'bot1', name: 'CPU 1', avatar: '🤡', score: 0, position: 0, isHost: false, isMe: false, mediaStatus: {audio:true, video:true} },
-    { id: 'bot2', name: 'CPU 2', avatar: '🥀', score: 0, position: 0, isHost: false, isMe: false, mediaStatus: {audio:true, video:true} },
-    { id: 'bot3', name: 'CPU 3', avatar: '🥛', score: 0, position: 0, isHost: false, isMe: false, mediaStatus: {audio:true, video:true} },
+    { id: MY_ID, name: 'ME', avatar: '🗑️🔥', score: 300, position: 0, isHost: true, isMe: true, mediaStatus: {audio:true, video:true} },
+    { id: 'bot1', name: 'CPU 1', avatar: '🤡', score: 100, position: 0, isHost: false, isMe: false, mediaStatus: {audio:true, video:true} },
+    { id: 'bot2', name: 'CPU 2', avatar: '🥀', score: 100, position: 0, isHost: false, isMe: false, mediaStatus: {audio:true, video:true} },
+    { id: 'bot3', name: 'CPU 3', avatar: '🥛', score: 100, position: 0, isHost: false, isMe: false, mediaStatus: {audio:true, video:true} },
 ];
 
 export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Sync Hook
   const { gameState, players: syncedPlayers, loading } = useGameSync(ROOM_ID);
   
-  // Local state for Mock Mode / Transient UI
   const [localPlayers, setLocalPlayers] = useState<Player[]>(MOCK_PLAYERS);
   const [gamePhase, setGamePhase] = useState<GamePhase>(GamePhase.LOBBY);
   const [localActiveQuestion, setLocalActiveQuestion] = useState<Question | null>(null);
   const [localVideoState, setLocalVideoState] = useState({ isPlaying: false, currentTime: 0 });
   const [localCurrentPlayerId, setLocalCurrentPlayerId] = useState<string>(MY_ID);
+  const [localWinnerId, setLocalWinnerId] = useState<string | null>(null);
   
-  // Event tracking for the Host Roast System
   const [lastEvent, setLastEvent] = useState<{ type: string; value?: any; timestamp: number } | null>(null);
 
-  // Derived state: Use DB state if available, else use Local state
   const isDb = isRealDb();
   
   const activeQuestion = isDb ? (gameState?.activeQuestion || null) : localActiveQuestion;
   const players = isDb ? syncedPlayers : localPlayers;
-  
-  // Turn Logic
   const currentPlayerId = isDb ? (gameState?.currentPlayerTurn || MY_ID) : localCurrentPlayerId;
+  const winnerId = isDb ? (gameState?.winnerId || null) : localWinnerId;
   const isMyTurn = currentPlayerId === MY_ID;
   
   const amIHost = players.find(p => p.id === MY_ID)?.isHost || false;
   const videoState = isDb ? (gameState?.videoSync || { isPlaying: false, currentTime: 0 }) : localVideoState;
 
-  // Initialize Game/Join Room (Real DB)
+  // Initialize
   useEffect(() => {
       if (!isDb) return;
-      // Simplistic "Join" logic placeholder
   }, [isDb]);
 
-  // Helper: Pick a random question
   const getRandomQuestion = (isForVideo: boolean): Question | null => {
-     const availableQuestions = STATIC_QUESTIONS.filter(q => q.type === (isForVideo ? 'video' : 'text'));
+     // Get all eligible questions
+     let availableQuestions = STATIC_QUESTIONS;
+     
+     // 70% chance to follow the tile type (Video vs Text), 30% chance of random chaos
+     const strictMode = Math.random() > 0.3;
+     if (strictMode) {
+         availableQuestions = STATIC_QUESTIONS.filter(q => q.type === (isForVideo ? 'video' : 'text'));
+     }
+
      if (availableQuestions.length === 0) return null;
      const randomQ = availableQuestions[Math.floor(Math.random() * availableQuestions.length)];
      return {
         ...randomQ,
         id: `q-${Date.now()}`,
+        // Ensure type consistency if we pulled from a mixed bag
         type: randomQ.type as 'text' | 'video',
         youtubeId: randomQ.youtubeId || '',
         startTime: randomQ.startTime || 0,
@@ -86,29 +89,39 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const movePlayer = useCallback(async (steps: number) => {
-    // Event Trigger for Host
     if (steps === 1) {
         setLastEvent({ type: 'rolled_one', value: steps, timestamp: Date.now() });
     }
 
-    // 1. Determine current position
     let currentPos = 0;
     const myPlayer = players.find(p => p.id === MY_ID);
     if (myPlayer) currentPos = myPlayer.position;
 
-    // 2. Calculate New Position
+    // CAP AT 23 (End of board)
     const newPosition = Math.min(currentPos + steps, 23);
     
-    // 3. Check for Question Trigger (every 3rd tile is video, others are text)
+    // Check Win Condition
+    if (newPosition >= 23) {
+        setLastEvent({ type: 'win', timestamp: Date.now() });
+        if (isDb) {
+            await updateDoc(doc(db, 'rooms', ROOM_ID), {
+                players: players.map(p => p.id === MY_ID ? { ...p, position: 23 } : p),
+                winnerId: MY_ID,
+                phase: GamePhase.GAME_OVER
+            });
+        } else {
+            setLocalPlayers(prev => prev.map(p => p.isMe ? { ...p, position: 23 } : p));
+            setLocalWinnerId(MY_ID);
+        }
+        return;
+    }
+
     const isVideoTile = newPosition % 3 === 0 && newPosition !== 0;
     const newQuestion = getRandomQuestion(isVideoTile);
 
-    // 4. Update State
     if (isDb) {
         if (!gameState || !isMyTurn) return;
-
         const updatedPlayers = players.map(p => p.id === MY_ID ? { ...p, position: newPosition } : p);
-
         await updateDoc(doc(db, 'rooms', ROOM_ID), {
             players: updatedPlayers,
             activeQuestion: newQuestion,
@@ -118,13 +131,7 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
         });
     } else {
-        // Mock Mode
-        setLocalPlayers(prev => prev.map(p => {
-             if (p.isMe) return { ...p, position: newPosition };
-             return p;
-        }));
-        
-        // Trigger question after a small delay to simulate game feel
+        setLocalPlayers(prev => prev.map(p => p.isMe ? { ...p, position: newPosition } : p));
         if (newQuestion) {
             setTimeout(() => {
                 setLocalActiveQuestion(newQuestion);
@@ -138,9 +145,7 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const toggleVideoState = useCallback(async (playing: boolean) => {
       if (isDb) {
-          await updateDoc(doc(db, 'rooms', ROOM_ID), {
-              "videoSync.isPlaying": playing
-          });
+          await updateDoc(doc(db, 'rooms', ROOM_ID), { "videoSync.isPlaying": playing });
       } else {
           setLocalVideoState(prev => ({ ...prev, isPlaying: playing }));
       }
@@ -149,18 +154,66 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const endTurn = useCallback(async () => {
     const currentIndex = players.findIndex(p => p.id === currentPlayerId);
     const nextIndex = (currentIndex + 1) % players.length;
-    const nextPlayerId = players[nextIndex].id;
+    const nextPlayer = players[nextIndex];
+
+    // If next player is FROZEN, skip them too (simplistic) OR just pass turn to them and force them to click "Skip"
+    // Let's pass to them, and UI will handle frozen state.
 
     if (isDb) {
-        await updateDoc(doc(db, 'rooms', ROOM_ID), {
-            currentPlayerTurn: nextPlayerId
-        });
+        await updateDoc(doc(db, 'rooms', ROOM_ID), { currentPlayerTurn: nextPlayer.id });
     } else {
-        setLocalCurrentPlayerId(nextPlayerId);
+        setLocalCurrentPlayerId(nextPlayer.id);
     }
   }, [players, currentPlayerId, isDb]);
 
-  // Mock Bot Turn Loop (Auto-pass turn back to player in mock mode)
+  const sabotagePlayer = useCallback(async (targetId: string, type: 'freeze' | 'bomb') => {
+      const COST = 300;
+      const myPlayer = players.find(p => p.id === MY_ID);
+      
+      if (!myPlayer || myPlayer.score < COST) return;
+
+      setLastEvent({ type: 'sabotage', value: type, timestamp: Date.now() });
+
+      if (isDb) {
+          const updatedPlayers = players.map(p => {
+              if (p.id === MY_ID) return { ...p, score: p.score - COST };
+              if (p.id === targetId) {
+                  if (type === 'freeze') return { ...p, statusEffect: 'frozen' as const };
+                  if (type === 'bomb') return { ...p, position: Math.max(0, p.position - 3) };
+              }
+              return p;
+          });
+          await updateDoc(doc(db, 'rooms', ROOM_ID), { players: updatedPlayers });
+      } else {
+          setLocalPlayers(prev => prev.map(p => {
+              if (p.id === MY_ID) return { ...p, score: p.score - COST };
+              if (p.id === targetId) {
+                  if (type === 'freeze') return { ...p, statusEffect: 'frozen' };
+                  if (type === 'bomb') return { ...p, position: Math.max(0, p.position - 3) };
+              }
+              return p;
+          }));
+      }
+  }, [players, isDb]);
+
+  // Handle "Skip Turn" when frozen
+  const skipFrozenTurn = useCallback(async () => {
+      setLastEvent({ type: 'frozen_turn', timestamp: Date.now() });
+      if (isDb) {
+           const updatedPlayers = players.map(p => p.id === MY_ID ? { ...p, statusEffect: undefined } : p);
+           // Clear status AND end turn
+           await updateDoc(doc(db, 'rooms', ROOM_ID), { 
+               players: updatedPlayers
+           });
+           // Small delay before passing turn so UI updates
+           setTimeout(() => endTurn(), 500);
+      } else {
+          setLocalPlayers(prev => prev.map(p => p.isMe ? { ...p, statusEffect: undefined } : p));
+          setTimeout(() => endTurn(), 500);
+      }
+  }, [players, isDb, endTurn]);
+
+  // Mock Bot Turn Loop
   useEffect(() => {
     if (!isDb && currentPlayerId !== MY_ID) {
         const timer = setTimeout(() => {
@@ -172,39 +225,21 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const submitAnswer = useCallback(async (answerIndex: number) => {
     if (!activeQuestion) return;
-    
     const isCorrect = answerIndex === activeQuestion.correctAnswerIndex;
     const points = activeQuestion.type === 'video' ? 200 : 100;
-
-    // Trigger Event for Host
-    setLastEvent({ 
-        type: isCorrect ? 'streak' : 'missed_question', 
-        value: isCorrect, 
-        timestamp: Date.now() 
-    });
+    setLastEvent({ type: isCorrect ? 'streak' : 'missed_question', value: isCorrect, timestamp: Date.now() });
 
     if (isDb) {
         const updatedPlayers = players.map(p => {
-            if (p.id === MY_ID) {
-                return { ...p, score: p.score + (isCorrect ? points : 0) };
-            }
+            if (p.id === MY_ID) return { ...p, score: p.score + (isCorrect ? points : 0) };
             return p;
         });
-
-        // Update score and clear active question, BUT DO NOT PASS TURN YET
-        await updateDoc(doc(db, 'rooms', ROOM_ID), {
-            players: updatedPlayers,
-            activeQuestion: null
-        });
+        await updateDoc(doc(db, 'rooms', ROOM_ID), { players: updatedPlayers, activeQuestion: null });
     } else {
-        // Mock Mode
         setLocalPlayers(prev => prev.map(p => p.isMe ? { ...p, score: p.score + (isCorrect ? points : 0)} : p));
         setLocalActiveQuestion(null); 
     }
   }, [activeQuestion, players, isDb]);
-
-  // Compatibility function (not strictly needed with new movePlayer logic but kept for safety)
-  const fetchNewQuestion = async () => {};
 
   return (
     <QuestionContext.Provider value={{
@@ -213,7 +248,7 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       gamePhase,
       players: players.map(p => ({...p, isMe: p.id === MY_ID})),
       setGamePhase,
-      fetchNewQuestion,
+      fetchNewQuestion: async () => {},
       submitAnswer,
       videoState,
       toggleVideoState,
@@ -222,8 +257,10 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       amIHost,
       myId: MY_ID,
       currentPlayerId,
-      endTurn,
-      lastEvent
+      endTurn: isMyTurn && players.find(p => p.id === MY_ID)?.statusEffect === 'frozen' ? skipFrozenTurn : endTurn,
+      sabotagePlayer,
+      lastEvent,
+      winnerId
     }}>
       {children}
     </QuestionContext.Provider>
@@ -232,8 +269,6 @@ export const QuestionProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
 export const useQuestion = () => {
   const context = useContext(QuestionContext);
-  if (context === undefined) {
-    throw new Error('useQuestion must be used within a QuestionProvider');
-  }
+  if (context === undefined) throw new Error('useQuestion must be used within a QuestionProvider');
   return context;
 };
